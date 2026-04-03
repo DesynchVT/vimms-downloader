@@ -22,13 +22,19 @@ USER_AGENTS: list[str] = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36",
 ]
 
+# Used for renaming the .txt file that comes with the download
+vimm_txt_filename = "Vimm's Lair.txt"
+
 script_name = os.path.basename(__file__)
 ROOT_DIRECTORY = os.path.abspath(__file__)
 # Slice off the 'run.py' portion of the path, plus a trailing slash
 ROOT_DIRECTORY = ROOT_DIRECTORY[0: -(len(script_name) + 1)]
 
-ROOT_DOWNLOAD_DIRECTORY = os.path.join(ROOT_DIRECTORY, "downloading")
-print("ROOT_DOWNLOAD_DIRECTORY:", ROOT_DOWNLOAD_DIRECTORY)
+DEFAULT_ROOT_DOWNLOAD_DIRECTORY = os.path.join(ROOT_DIRECTORY, "downloading")
+DEFAULT_ROOT_FINISHED_DIRECTORY = os.path.join(ROOT_DIRECTORY, "finished")
+
+SOURCE_DIRECTORY = os.path.join(ROOT_DIRECTORY, "consoles")
+DOWNLOAD_HISTORY_DIRECTORY = os.path.join(ROOT_DIRECTORY, "history")
 
 
 def get_random_ua() -> str:
@@ -81,7 +87,7 @@ def get_media(url: str) -> VimmMedia | None:
     return {"id": media_id, "url": download_url}
 
 
-def download(media: VimmMedia):
+def download(media: VimmMedia, destination: str) -> str | None:
     download_url = f"https:{media['url']}?mediaId={media['id']}"
     print("download_url:", download_url)
     headers = {
@@ -106,7 +112,7 @@ def download(media: VimmMedia):
     with requests.get(
         download_url, headers=headers, stream=True, verify=False
     ) as response:
-        if not response.status_code == 200 or response.status_code == 304:
+        if response.status_code != 200 or response.status_code != 304:
             print("Error downloading media:",
                   response.text, response.status_code)
         total_size = int(response.headers.get("content-length", 0))
@@ -116,29 +122,28 @@ def download(media: VimmMedia):
         if match is None:
             # Something is terribly wrong if we go here
             print("Could not find filename in download!")
-            return
+            return None
         filename = match.group(1)
-        file_path = os.path.join(ROOT_DOWNLOAD_DIRECTORY, filename)
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        archive_path = os.path.join(DEFAULT_ROOT_DOWNLOAD_DIRECTORY, filename)
+        os.makedirs(os.path.dirname(archive_path), exist_ok=True)
 
-        with tqdm(total=total_size, unit="B", unit_scale=True, desc=file_path) as pbar:
-            with open(file_path, "wb") as file:
+        with tqdm(
+            total=total_size, unit="B", unit_scale=True, desc=archive_path
+        ) as pbar:
+            with open(archive_path, "wb") as file:
                 for chunk in response.iter_content(chunk_size=1024):
                     if chunk:
                         file.write(chunk)
                         pbar.update(len(chunk))
         print("Download finished!")
-        extract_dir = os.path.join(ROOT_DIRECTORY, "finished")
-        if extract_and_delete(file_path, extract_dir):
-            print(f"Successfully extracted and deleted {file_path}")
-        else:
-            print(f"Failed to extract or delete {file_path}")
-        return response.status_code
+
+        return archive_path
+        # return response.status_code
 
 
 def extract_and_delete(archive_path: str, extract_dir: str) -> bool:
     try:
-        os.makedirs(extract_dir, exist_ok=True)
+        ensure_directory_exists(extract_dir)
         if archive_path.endswith(".zip"):
             with zipfile.ZipFile(archive_path, "r") as zip_ref:
                 zip_ref.extractall(extract_dir)
@@ -159,25 +164,101 @@ def extract_and_delete(archive_path: str, extract_dir: str) -> bool:
         return False
 
 
-def download_from_txt(file: str):
-    try:
-        with open(file, "r") as f:
-            lines = f.readlines()
-            for line in lines:
-                url = line.strip()
-                print(f"URL: {url}")
-                media = get_media(url)
-                if media is None:
-                    print("Media not found")
-                    continue
-                print(f"Media found: {media['id']} {media['url']}")
-                download(media)
-    except Exception as e:
-        raise e
+def download_from_txt(file: str, destination: str):
+    history = get_history()
+    vimm_vault_pattern = re.compile(r"^https?:\/\/vimm\.net\/vault\/.+$")
+    with open(file, "r") as f:
+        lines = f.readlines()
+        for line in lines:
+            url = line.strip()
+            if not vimm_vault_pattern.match(url):
+                print(f"{url} is not a valid vimm vault url. Skipping...")
+                continue
+            print(f"URL: {url}")
+            media_id = url.rsplit("/", 1)[-1]
+            if media_id in history:
+                print(
+                    f"file at {url} has been downloaded previously. Skipping...")
+                continue
+            media = None
+            # media = get_media(url)
+            if media is None:
+                print("Media not found")
+                continue
+            print(f"Media found: {media['id']} {media['url']}")
+            archive_path = download(media, destination)
+            download_was_successful = True
+            # Download failed
+            if archive_path is None:
+                download_was_successful = False
+                log_download(download_was_successful, media["id"])
+                continue
+            # Download succeeded
+            if extract_and_delete(archive_path, destination):
+                print(f"Successfully extracted and deleted {archive_path}")
+            else:
+                print(f"Failed to extract or delete {archive_path}")
+            log_download(download_was_successful, media["id"])
+
+
+def log_download(success: bool, id: int):
+    ensure_directory_exists(DOWNLOAD_HISTORY_DIRECTORY)
+    file = "download_history" if success else "failed_downloads"
+    file = f"{file}.csv"
+    history_file = os.path.join(DOWNLOAD_HISTORY_DIRECTORY, file)
+    if not os.path.exists(history_file):
+        with open(history_file, "x") as f:
+            f.write(f"{id}")
+        return
+    with open(history_file, "a") as f:
+        f.write(f",{id}")
+
+
+def get_history() -> str:
+    ensure_directory_exists(DOWNLOAD_HISTORY_DIRECTORY)
+    history_file = os.path.join(
+        DOWNLOAD_HISTORY_DIRECTORY, "download_history.csv")
+    if not os.path.exists(history_file):
+        return ""
+    with open(history_file, "r") as f:
+        return f.readline()
+
+
+def get_consoles() -> list[str]:
+    consoles = []
+    for file in os.listdir(SOURCE_DIRECTORY):
+        if file.endswith(".txt"):
+            consoles.append(file)
+    return consoles
+
+
+def ensure_directory_exists(directory: str):
+    if not os.path.isdir(directory):
+        print(f"Creating directory at {directory}")
+        os.makedirs(directory)
+
+
+def ensure_base_dirs_exist():
+    base_dirs = [
+        SOURCE_DIRECTORY,
+        DEFAULT_ROOT_FINISHED_DIRECTORY,
+        DEFAULT_ROOT_DOWNLOAD_DIRECTORY,
+    ]
+    for dir in base_dirs:
+        ensure_directory_exists(dir)
 
 
 def main():
-    download_from_txt("links.txt")
+    ensure_base_dirs_exist()
+    consoles = get_consoles()
+    for console_txt in consoles:
+        print(f"Downloading from {console_txt}")
+        console_name = console_txt[:-4]
+        path_to_console = os.path.join(SOURCE_DIRECTORY, console_txt)
+        destination = os.path.join(
+            DEFAULT_ROOT_FINISHED_DIRECTORY, console_name)
+        ensure_directory_exists(destination)
+        download_from_txt(path_to_console, destination)
 
 
 if __name__ == "__main__":
