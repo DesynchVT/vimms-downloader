@@ -3,6 +3,7 @@ import os
 import random
 import re
 import zipfile
+import shutil
 
 import py7zr
 import requests
@@ -23,7 +24,7 @@ USER_AGENTS: list[str] = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36",
 ]
 
-# Used for renaming the .txt file that comes with the download
+# Used for renaming/deleting the .txt file that comes with each download
 vimm_txt_filename = "Vimm's Lair.txt"
 
 SETTINGS = {}
@@ -77,6 +78,17 @@ def get_media(url: str) -> VimmMedia | None:
     if not media_id.isdigit():
         print(f"Media id invalid: {media_id}(is {type(media_id)}")
         return None
+
+    download_history = get_history()
+    if media_id in download_history:
+        print(f"WARNING: {url} has been downloaded previously.")
+        print(
+            f"WARNING: Remove {media_id} from {
+                DOWNLOAD_HISTORY_DIRECTORY
+            }/download_history.csv to download it again."
+        )
+        add_to_failed_downloads(url)
+        return None
     media_id = int(media_id)
 
     download_url = url_element["action"]
@@ -89,7 +101,7 @@ def get_media(url: str) -> VimmMedia | None:
     download_url_pattern = re.compile(r"^\/\/dl\d?\.vimm\.net\/$")
     if not download_url_pattern.match(download_url):
         print(f"Download url is invalid: {download_url}")
-        print("A valid download url should look like this: //dl3.vimm.net/")
+        print("Example download url: //dl3.vimm.net/[MEDIA_ID]")
         return None
 
     # Everything looks good
@@ -150,20 +162,53 @@ def download(media: VimmMedia, destination: str):
 def extract_and_delete(archive_path: str, extract_dir: str) -> bool:
     try:
         ensure_directory_exists(extract_dir)
+        print(f"Extracting {archive_path}")
+        archive_directory, media_title = os.path.split(archive_path)
+        # Remove extension from file name
+        media_title = media_title.rsplit(".", 1)[0]
         if archive_path.endswith(".zip"):
             with zipfile.ZipFile(archive_path, "r") as zip_ref:
-                zip_ref.extractall(extract_dir)
-                print(f"Extracted zip: {archive_path} to {extract_dir}")
+                zip_ref.extractall(archive_directory)
+                print(f"Extracted zip: {archive_path} to {archive_directory}")
         elif archive_path.endswith(".7z"):
             with py7zr.SevenZipFile(archive_path, "r") as seven_zip:
-                seven_zip.extractall(extract_dir)
-                print(f"Extracted 7z: {archive_path} to {extract_dir}")
+                seven_zip.extractall(archive_directory)
+                print(f"Extracted 7z: {archive_path} to {archive_directory}")
         else:
             print(f"Unsupported file format: {archive_path}")
             return False
-
+        # Delete downloaded archive
         os.remove(archive_path)
-        print(f"Deleted original file: {archive_path}")
+        # Delete or rename included Vimm.txt file to match downloaded media title
+        for file in os.listdir(archive_directory):
+            file_path = os.path.join(archive_directory, file)
+            if file == vimm_txt_filename:
+                if "removeVimmTxt" in SETTINGS and SETTINGS["removeVimmTxt"]:
+                    print(f"Deleting {vimm_txt_filename}")
+                    os.remove(file_path)
+                else:
+                    print(f"Renaming {vimm_txt_filename}")
+                    media_title_txt = os.path.join(
+                        archive_directory, f"{media_title}.txt"
+                    )
+                    os.rename(file_path, media_title_txt)
+                break
+        # Optionally re-zip files for storage
+        if "rezip" in SETTINGS and SETTINGS["rezip"]:
+            print("compressing downloaded files...")
+            new_zip = os.path.join(extract_dir, media_title)
+            shutil.make_archive(new_zip, "zip", archive_directory)
+            for file in os.listdir(archive_directory):
+                if file.endswith(".zip"):
+                    continue
+                print(f"removing file {file}")
+                os.remove(os.path.join(archive_directory, file))
+            return True
+        # Move everything where it belongs
+        for file in os.listdir(archive_directory):
+            file_path = os.path.join(archive_directory, file)
+            destination_path = os.path.join(extract_dir, file)
+            os.rename(file_path, destination_path)
         return True
     except Exception as e:
         print(f"Error extracting {archive_path}: {e}")
@@ -171,7 +216,6 @@ def extract_and_delete(archive_path: str, extract_dir: str) -> bool:
 
 
 def download_from_txt(file: str, destination: str):
-    history = get_history()
     vimm_vault_pattern = re.compile(r"^https?:\/\/vimm\.net\/vault\/.+$")
     with open(file, "r") as f:
         lines = f.readlines()
@@ -181,41 +225,46 @@ def download_from_txt(file: str, destination: str):
                 print(f"{url} is not a valid vimm vault url. Skipping...")
                 continue
             print(f"URL: {url}")
-            media_id = url.rsplit("/", 1)[-1]
-            if media_id in history:
-                print(f"{url} has been downloaded previously. Skipping...")
-                continue
             media = get_media(url)
             if media is None:
                 print("Media not found")
                 continue
             print(f"Media found: {media['id']} {media['url']}")
             archive_path = download(media, destination)
-            download_was_successful = True
             # Download failed
             if archive_path is None:
-                download_was_successful = False
-                log_download(download_was_successful, media["id"])
+                add_to_failed_downloads(media["url"])
                 continue
             # Download succeeded
+            add_to_history(media["id"])
             if extract_and_delete(archive_path, destination):
                 print(f"Successfully extracted and deleted {archive_path}")
             else:
                 print(f"Failed to extract or delete {archive_path}")
-            log_download(download_was_successful, media["id"])
 
 
-def log_download(success: bool, id: int):
+def add_to_history(id: int):
     ensure_directory_exists(DOWNLOAD_HISTORY_DIRECTORY)
-    file = "download_history" if success else "failed_downloads"
-    file = f"{file}.csv"
-    history_file = os.path.join(DOWNLOAD_HISTORY_DIRECTORY, file)
+    history_file = os.path.join(
+        DOWNLOAD_HISTORY_DIRECTORY, "download_history.csv")
     if not os.path.exists(history_file):
         with open(history_file, "x") as f:
             f.write(f"{id}")
         return
     with open(history_file, "a") as f:
         f.write(f",{id}")
+
+
+def add_to_failed_downloads(url: str):
+    ensure_directory_exists(DOWNLOAD_HISTORY_DIRECTORY)
+    failed_downloads = os.path.join(
+        DOWNLOAD_HISTORY_DIRECTORY, "failed_downloads.csv")
+    if not os.path.exists(failed_downloads):
+        with open(failed_downloads, "x") as f:
+            f.write(f"{url}")
+        return
+    with open(failed_downloads, "a") as f:
+        f.write(f",{url}")
 
 
 def get_history() -> str:
@@ -239,7 +288,12 @@ def get_consoles() -> list[str]:
 def ensure_directory_exists(directory: str):
     if not os.path.isdir(directory):
         print(f"Creating directory at {directory}")
-        os.makedirs(directory)
+        try:
+            os.makedirs(directory)
+        except Exception as e:
+            print(f"Error creating directory at {directory}")
+            print("Error:", e)
+            raise e
 
 
 def ensure_base_dirs_exist():
@@ -255,6 +309,7 @@ def ensure_base_dirs_exist():
 def main():
     ensure_base_dirs_exist()
     consoles = get_consoles()
+
     for console_txt in consoles:
         print(f"Downloading from {console_txt}")
         console_name = console_txt[:-4]
@@ -266,6 +321,12 @@ def main():
             destination = SETTINGS[console_name]
         ensure_directory_exists(destination)
         download_from_txt(path_to_console, destination)
+    print("Finished downloading!")
+    print(
+        f"Check {
+            DOWNLOAD_HISTORY_DIRECTORY
+        }/failed_downloads.csv to view any potentially failed download links."
+    )
 
 
 if __name__ == "__main__":

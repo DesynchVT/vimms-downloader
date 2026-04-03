@@ -1,5 +1,5 @@
 {
   "rootFinishedDirectory": "",
   "rezip": false,
-  "removeVimmTxt": true
+  "removeVimmTxt": false
 }
