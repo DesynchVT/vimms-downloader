@@ -47,7 +47,7 @@ That's it! The script will download all the files from the specified pages in ev
 Everything mentioned above is the default behaviour. You can easily change parts of the process by editing the `settings.json` file.
 Deleting any of the keys `rootFinishedDirectory`, `rezip`, and `removeVimmTxt` will result in the script assuming its default behaviour.
 
-```json
+```jsonc
 {
   // Absolute path to storing downloaded files.
   // Still sorts downloads into subdirectories, but at your specified location instead.
@@ -57,7 +57,7 @@ Deleting any of the keys `rootFinishedDirectory`, `rezip`, and `removeVimmTxt` w
   "rezip": false,
   // Change to true to delete the "Vimm's Lair.txt" file included in every download.
   // Default behaviour is to rename it to the downloaded file's title.
-  "removeVimmTxt": false
+  "removeVimmTxt": false,
 }
 ```
 
