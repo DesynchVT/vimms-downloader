@@ -1,3 +1,4 @@
+import json
 import os
 import random
 import re
@@ -25,6 +26,11 @@ USER_AGENTS: list[str] = [
 # Used for renaming the .txt file that comes with the download
 vimm_txt_filename = "Vimm's Lair.txt"
 
+SETTINGS = {}
+if os.path.exists("settings.json"):
+    with open("settings.json", "r") as f:
+        SETTINGS = json.load(f)
+
 script_name = os.path.basename(__file__)
 ROOT_DIRECTORY = os.path.abspath(__file__)
 # Slice off the 'run.py' portion of the path, plus a trailing slash
@@ -32,6 +38,9 @@ ROOT_DIRECTORY = ROOT_DIRECTORY[0: -(len(script_name) + 1)]
 
 DEFAULT_ROOT_DOWNLOAD_DIRECTORY = os.path.join(ROOT_DIRECTORY, "downloading")
 DEFAULT_ROOT_FINISHED_DIRECTORY = os.path.join(ROOT_DIRECTORY, "finished")
+ROOT_FINISHED_DIRECTORY = DEFAULT_ROOT_FINISHED_DIRECTORY
+if "rootFinishedDirectory" in SETTINGS and SETTINGS["rootFinishedDirectory"] != "":
+    ROOT_FINISHED_DIRECTORY = SETTINGS["rootFinishedDirectory"]
 
 SOURCE_DIRECTORY = os.path.join(ROOT_DIRECTORY, "consoles")
 DOWNLOAD_HISTORY_DIRECTORY = os.path.join(ROOT_DIRECTORY, "history")
@@ -87,9 +96,10 @@ def get_media(url: str) -> VimmMedia | None:
     return {"id": media_id, "url": download_url}
 
 
-def download(media: VimmMedia, destination: str) -> str | None:
-    download_url = f"https:{media['url']}?mediaId={media['id']}"
-    print("download_url:", download_url)
+def download(media: VimmMedia, destination: str):
+    archive_path = None
+    downloadUrl = f"https:{media['url']}?mediaId={media['id']}"
+    print(downloadUrl)
     headers = {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         "Accept-Encoding": "gzip, deflate, br, zstd",
@@ -108,37 +118,33 @@ def download(media: VimmMedia, destination: str) -> str | None:
         "Upgrade-Insecure-Requests": "1",
         "User-Agent": get_random_ua(),
     }
-
     with requests.get(
-        download_url, headers=headers, stream=True, verify=False
+        downloadUrl, headers=headers, stream=True, verify=False
     ) as response:
-        if response.status_code != 200 or response.status_code != 304:
+        if response.status_code == 200 or response.status_code == 304:
+            total_size = int(response.headers.get("content-length", 0))
+            content_disposition = response.headers.get("content-disposition")
+            filename = None
+            match = re.search(r'filename="(.+?)"', content_disposition)
+            if match:
+                filename = match.group(1)
+            archive_path = os.path.join(
+                DEFAULT_ROOT_DOWNLOAD_DIRECTORY, filename)
+            os.makedirs(os.path.dirname(archive_path), exist_ok=True)
+            with tqdm(
+                total=total_size, unit="B", unit_scale=True, desc=archive_path
+            ) as pbar:
+                with open(archive_path, "wb") as file:
+                    for chunk in response.iter_content(chunk_size=1024):
+                        if chunk:
+                            file.write(chunk)
+                            pbar.update(len(chunk))
+            print("Download finished!")
+            return archive_path
+        else:
             print("Error downloading media:",
                   response.text, response.status_code)
-        total_size = int(response.headers.get("content-length", 0))
-        content_disposition = response.headers.get("content-disposition") or ""
-        filename_pattern = re.compile(r'filename="(.+?)"')
-        match = re.search(filename_pattern, content_disposition)
-        if match is None:
-            # Something is terribly wrong if we go here
-            print("Could not find filename in download!")
-            return None
-        filename = match.group(1)
-        archive_path = os.path.join(DEFAULT_ROOT_DOWNLOAD_DIRECTORY, filename)
-        os.makedirs(os.path.dirname(archive_path), exist_ok=True)
-
-        with tqdm(
-            total=total_size, unit="B", unit_scale=True, desc=archive_path
-        ) as pbar:
-            with open(archive_path, "wb") as file:
-                for chunk in response.iter_content(chunk_size=1024):
-                    if chunk:
-                        file.write(chunk)
-                        pbar.update(len(chunk))
-        print("Download finished!")
-
-        return archive_path
-        # return response.status_code
+            return archive_path
 
 
 def extract_and_delete(archive_path: str, extract_dir: str) -> bool:
@@ -177,11 +183,9 @@ def download_from_txt(file: str, destination: str):
             print(f"URL: {url}")
             media_id = url.rsplit("/", 1)[-1]
             if media_id in history:
-                print(
-                    f"file at {url} has been downloaded previously. Skipping...")
+                print(f"{url} has been downloaded previously. Skipping...")
                 continue
-            media = None
-            # media = get_media(url)
+            media = get_media(url)
             if media is None:
                 print("Media not found")
                 continue
@@ -255,8 +259,11 @@ def main():
         print(f"Downloading from {console_txt}")
         console_name = console_txt[:-4]
         path_to_console = os.path.join(SOURCE_DIRECTORY, console_txt)
-        destination = os.path.join(
-            DEFAULT_ROOT_FINISHED_DIRECTORY, console_name)
+        destination = os.path.join(ROOT_FINISHED_DIRECTORY, console_name)
+        if console_txt in SETTINGS and SETTINGS[console_txt] != "":
+            destination = SETTINGS[console_txt]
+        elif console_name in SETTINGS and SETTINGS[console_name] != "":
+            destination = SETTINGS[console_name]
         ensure_directory_exists(destination)
         download_from_txt(path_to_console, destination)
 
