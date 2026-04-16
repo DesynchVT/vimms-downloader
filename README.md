@@ -18,15 +18,20 @@ cd vimms-downloader
 pip install -r requirements.txt
 ```
 
-Create a folder named `consoles` in the same directory as the script. Inside the `console` folder, create a text file with whatever name you want such as `PS2.txt`. Text files inside the `consoles` folder should contain the URLs of the pages you want to download from, one per line. For example:
+Create a folder named `consoles` in the same directory as the script. Inside the `console` folder, create a text file with whatever name you want such as `ps2.txt`. Text files inside the `consoles` folder should contain the URLs of the pages you want to download from, one per line. For example:
 
-```text (PS2.txt)
+```text (ps2.txt)
 https://vimm.net/vault/7836
 https://vimm.net/vault/7970
 https://vimm.net/vault/8000
 ```
 
-You can create as many text files inside `consoles` as you want. Downloaded files will automatically be sorted into a subdirectory of the same name in the `finished` directory. For example, `finished/PS2/Bully (USA).iso` from `consoles/PS2.txt`.
+```text (wii.txt)
+https://vimm.net/vault/18297   <- Downloads the default format (.wbfs)
+https://vimm.net/vault/18297 1 <- Downloads the alternate format (.rvz)
+```
+
+You can create as many text files inside `consoles` as you want. Downloaded files will automatically be sorted into a subdirectory of the same name in the `finished` directory. For example, `finished/ps2/Bully (USA).iso` from `consoles/ps2.txt`.
 You can of course also just dump every link into a single file called `links.txt` or something, if you want.
 
 The script will automatically create three directories if they do not exist:
@@ -61,7 +66,7 @@ Deleting any of the keys `rootFinishedDirectory`, `rezip`, and `removeVimmTxt` w
 }
 ```
 
-You can also store each system's files in a completely different location by adding your .txt file from `consoles` to `settings.json`. If we take our `PS2.txt` example from above, it could look like this
+You can also store each system's files in a completely different location by adding your .txt file from `consoles` to `settings.json`. If we take our `ps2.txt` example from above, it could look like this
 
 ```jsonc
 {
@@ -71,6 +76,6 @@ You can also store each system's files in a completely different location by add
   "rootFinishedDirectory": "/path/to/my/collection",
   "rezip": false,
   "removeVimmTxt": false,
-  "PS2": "/some/other/path", // <- Downloads from PS2.txt will be store here instead of the path above
+  "ps2": "/some/other/path", // <- Downloads from ps2.txt will be store here instead of the path above
 }
 ```
