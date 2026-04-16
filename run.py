@@ -35,7 +35,7 @@ if os.path.exists("settings.json"):
 script_name = os.path.basename(__file__)
 ROOT_DIRECTORY = os.path.abspath(__file__)
 # Slice off the 'run.py' portion of the path, plus a trailing slash
-ROOT_DIRECTORY = ROOT_DIRECTORY[0: -(len(script_name) + 1)]
+ROOT_DIRECTORY = ROOT_DIRECTORY[0 : -(len(script_name) + 1)]
 
 DEFAULT_ROOT_DOWNLOAD_DIRECTORY = os.path.join(ROOT_DIRECTORY, "downloading")
 DEFAULT_ROOT_FINISHED_DIRECTORY = os.path.join(ROOT_DIRECTORY, "finished")
@@ -53,7 +53,9 @@ def get_random_ua() -> str:
     return USER_AGENTS[index]
 
 
-def get_media(url: str) -> VimmMedia | None:
+def get_media(
+    url: str, alt: int | None = None, version: int | None = None
+) -> VimmMedia | None:
     print(f"Getting media information from {url}")
     response = requests.get(url, verify=False)
 
@@ -96,6 +98,27 @@ def get_media(url: str) -> VimmMedia | None:
         print(f"Download url is invalid: {download_url}")
         return None
 
+    # Check desired format download exists
+    if alt:
+        format_elements = soup.find("select", {"id": "dl_format"})
+        if not format_elements:
+            print("Could not find alternate formats to the download. Skipping.")
+            add_to_failed_downloads(url)
+            return None
+
+        alt_options = format_elements.find_all("option")
+        has_desired_alt = False
+        for option in alt_options:
+            print(option)
+            print(f"value: {option['value']}")
+            if option["value"] == str(alt):
+                has_desired_alt = True
+                break
+        if not has_desired_alt:
+            print(f"Could not find a format with a value of {alt}. Skipping.")
+            add_to_failed_downloads(url)
+            return None
+
     # Check download_url matches what an action url looks like
     # E.g.: //dl3.vimm.net/ or //dl2.vimm.net/
     download_url_pattern = re.compile(r"^\/\/dl\d?\.vimm\.net\/$")
@@ -105,12 +128,19 @@ def get_media(url: str) -> VimmMedia | None:
         return None
 
     # Everything looks good
-    return {"id": media_id, "url": download_url}
+    return {"id": media_id, "url": download_url, "alt": alt, "version": version}
 
 
-def download(media: VimmMedia, destination: str):
+# Changing the 'version' dropdown changes the mediaId in the download url
+# Unsure of how to fix it
+# Example using Wii Sports:
+# 1.1: https://dl3.vimm.net/?mediaId=9829
+# 1.0: https://dl3.vimm.net/?mediaId=58693
+def download(media: VimmMedia):
     archive_path = None
     downloadUrl = f"https:{media['url']}?mediaId={media['id']}"
+    if media["alt"]:
+        downloadUrl += f"&alt={media['alt']}"
     print(downloadUrl)
     headers = {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
@@ -140,8 +170,7 @@ def download(media: VimmMedia, destination: str):
             match = re.search(r'filename="(.+?)"', content_disposition)
             if match:
                 filename = match.group(1)
-            archive_path = os.path.join(
-                DEFAULT_ROOT_DOWNLOAD_DIRECTORY, filename)
+            archive_path = os.path.join(DEFAULT_ROOT_DOWNLOAD_DIRECTORY, filename)
             os.makedirs(os.path.dirname(archive_path), exist_ok=True)
             with tqdm(
                 total=total_size, unit="B", unit_scale=True, desc=archive_path
@@ -154,8 +183,7 @@ def download(media: VimmMedia, destination: str):
             print("Download finished!")
             return archive_path
         else:
-            print("Error downloading media:",
-                  response.text, response.status_code)
+            print("Error downloading media:", response.text, response.status_code)
             return archive_path
 
 
@@ -220,17 +248,45 @@ def download_from_txt(file: str, destination: str):
     with open(file, "r") as f:
         lines = f.readlines()
         for line in lines:
-            url = line.strip()
+            # Separate line into arguments on spaces
+            args = line.strip().split(" ")
+            # Silly syntax to ensure the "args" list has a minimum length of 3 so it can unpack
+            args = args + [None] * (3 - len(args))
+            url = args[0]
+            if not url:
+                print("ERROR: No URL given.")
+                continue
+            # "alt" is optional, but version should still be reachable
+            alt = args[1] if args[1] != "" else None
+            if alt:
+                try:
+                    alt = int(alt)
+                except Exception:
+                    print("alt is not a number. Skipping.")
+                    add_to_failed_downloads(url)
+                    continue
+            version = args[2]
+            if version:
+                try:
+                    version = int(version)
+                except Exception:
+                    print("version is not a number. Skipping.")
+                    add_to_failed_downloads(url)
+                    continue
+            print(f"url: {url}")
+            print(f"alt: {alt}")
+            print(f"version: {version}")
+
             if not vimm_vault_pattern.match(url):
                 print(f"{url} is not a valid vimm vault url. Skipping...")
                 continue
             print(f"URL: {url}")
-            media = get_media(url)
+            media = get_media(url, alt, version)
             if media is None:
                 print("Media not found")
                 continue
             print(f"Media found: {media['id']} {media['url']}")
-            archive_path = download(media, destination)
+            archive_path = download(media)
             # Download failed
             if archive_path is None:
                 add_to_failed_downloads(media["url"])
@@ -245,8 +301,7 @@ def download_from_txt(file: str, destination: str):
 
 def add_to_history(id: int):
     ensure_directory_exists(DOWNLOAD_HISTORY_DIRECTORY)
-    history_file = os.path.join(
-        DOWNLOAD_HISTORY_DIRECTORY, "download_history.csv")
+    history_file = os.path.join(DOWNLOAD_HISTORY_DIRECTORY, "download_history.csv")
     if not os.path.exists(history_file):
         with open(history_file, "x") as f:
             f.write(f"{id}")
@@ -257,8 +312,7 @@ def add_to_history(id: int):
 
 def add_to_failed_downloads(url: str):
     ensure_directory_exists(DOWNLOAD_HISTORY_DIRECTORY)
-    failed_downloads = os.path.join(
-        DOWNLOAD_HISTORY_DIRECTORY, "failed_downloads.csv")
+    failed_downloads = os.path.join(DOWNLOAD_HISTORY_DIRECTORY, "failed_downloads.csv")
     if not os.path.exists(failed_downloads):
         with open(failed_downloads, "x") as f:
             f.write(f"{url}")
@@ -269,8 +323,7 @@ def add_to_failed_downloads(url: str):
 
 def get_history() -> str:
     ensure_directory_exists(DOWNLOAD_HISTORY_DIRECTORY)
-    history_file = os.path.join(
-        DOWNLOAD_HISTORY_DIRECTORY, "download_history.csv")
+    history_file = os.path.join(DOWNLOAD_HISTORY_DIRECTORY, "download_history.csv")
     if not os.path.exists(history_file):
         return ""
     with open(history_file, "r") as f:
