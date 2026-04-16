@@ -21,12 +21,14 @@ pip install -r requirements.txt
 Create a folder named `consoles` in the same directory as the script. Inside the `console` folder, create a text file with whatever name you want such as `ps2.txt`. Text files inside the `consoles` folder should contain the URLs of the pages you want to download from, one per line. For example:
 
 ```text (ps2.txt)
+# ps2.txt
 https://vimm.net/vault/7836
 https://vimm.net/vault/7970
 https://vimm.net/vault/8000
 ```
 
 ```text (wii.txt)
+# wii.txt
 https://vimm.net/vault/18297   <- Downloads the default format (.wbfs)
 https://vimm.net/vault/18297 1 <- Downloads the alternate format (.rvz)
 ```
