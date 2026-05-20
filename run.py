@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 
 from config import DOWNLOAD_DIR, SOURCE_DIR, FINISHED_DIR, SETTINGS
 from downloader import get_media, download
@@ -8,6 +9,9 @@ from history import add_to_history, add_to_failed_downloads
 
 
 def main():
+    # Delete the temporary download directory upon start, in case there are leftover files in there
+    if os.path.isdir(DOWNLOAD_DIR):
+        shutil.rmtree(DOWNLOAD_DIR)
     _ensure_base_dirs()
 
     for console_txt in os.listdir(SOURCE_DIR):
