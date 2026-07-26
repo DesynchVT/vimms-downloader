@@ -61,8 +61,11 @@ def _rezip_contents(archive_dir: str, extract_dir: str, media_title: str):
     for file in os.listdir(archive_dir):
         file_path = os.path.join(archive_dir, file)
         if not file.endswith(".zip"):
-            print(f"Removing file {file}")
-            os.remove(file_path)
+            print(f"Removing {file}")
+            if os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+            else:
+                os.remove(file_path)
 
 
 def _move_contents(archive_dir: str, extract_dir: str):

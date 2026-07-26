@@ -108,7 +108,7 @@ def download(media: VimmMedia) -> str | None:
 
         total_size = int(response.headers.get("content-length", 0))
         content_disposition = response.headers.get("content-disposition")
-        filename = None
+        filename = ""
         match = re.search(r'filename="(.+?)"', content_disposition or "")
         if match:
             filename = match.group(1)
