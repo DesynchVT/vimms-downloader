@@ -59,9 +59,11 @@ Deleting any of the keys `rootFinishedDirectory`, `rezip`, and `removeVimmTxt` w
   // Absolute path to storing downloaded files.
   // Still sorts downloads into subdirectories, but at your specified location instead.
   "rootFinishedDirectory": "",
-  // Change to true to zip downloaded files after download.
-  // For smaller file size, and making sure all downloads are the .zip format.
-  "rezip": false,
+  // Change to true to re-compress downloaded files after download.
+  // For smaller file size, and making sure all downloads are the .tar.xz format.
+  // Uses LZMA2 (xz -T0 -9); each download becomes one <title>.tar.xz archive
+  // bundling the ROM file(s) and the Vimm's Lair text file.
+  "rezip": true,
   // Change to true to delete the "Vimm's Lair.txt" file included in every download.
   // Default behaviour is to rename it to the downloaded file's title.
   "removeVimmTxt": false,
@@ -76,8 +78,10 @@ You can also store each system's files in a completely different location by add
   // Use two backslashes on windows instead.
   // Or just copy the path from your file explorer.
   "rootFinishedDirectory": "/path/to/my/collection",
-  "rezip": false,
+  "rezip": true,
   "removeVimmTxt": false,
   "ps2": "/some/other/path", // <- Downloads from ps2.txt will be store here instead of the path above
 }
 ```
+
+With `rezip` enabled, each download is stored as a single `<title>.tar.xz` archive (LZMA2) that bundles the ROM file(s) and the `Vimm's Lair.txt` file. To get the ROM back, extract it with `tar -xf <title>.tar.xz` (or `7z x <title>.tar.xz`).

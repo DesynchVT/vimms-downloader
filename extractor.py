@@ -1,5 +1,7 @@
 import os
 import shutil
+import subprocess
+import tarfile
 import zipfile
 
 import py7zr
@@ -29,7 +31,7 @@ def extract_and_delete(archive_path: str, extract_dir: str) -> bool:
         _handle_vimm_txt(archive_dir, media_title)
 
         if SETTINGS.get("rezip"):
-            _rezip_contents(archive_dir, extract_dir, media_title)
+            _recompress_contents(archive_dir, extract_dir, media_title)
         else:
             _move_contents(archive_dir, extract_dir)
 
@@ -53,19 +55,39 @@ def _handle_vimm_txt(archive_dir: str, media_title: str):
         os.rename(vimm_txt_path, new_path)
 
 
-def _rezip_contents(archive_dir: str, extract_dir: str, media_title: str):
+def _recompress_contents(archive_dir: str, extract_dir: str, media_title: str):
     print("Compressing downloaded files...")
-    new_zip_path = os.path.join(extract_dir, media_title)
-    shutil.make_archive(new_zip_path, "zip", archive_dir)
+    out_path = os.path.join(extract_dir, f"{media_title}.tar.xz")
+    os.makedirs(extract_dir, exist_ok=True)
+    try:
+        with open(out_path, "wb") as out_file:
+            xz_proc = subprocess.Popen(
+                ["xz", "-T0", "-9", "-c"],
+                stdin=subprocess.PIPE,
+                stdout=out_file,
+            )
+            with tarfile.open(
+                fileobj=xz_proc.stdin, mode="w|", format=tarfile.PAX_FORMAT
+            ) as tar:
+                tar.add(archive_dir, arcname=".")
+            xz_proc.stdin.close()
+            if xz_proc.wait() != 0:
+                raise RuntimeError(f"xz compression failed: {out_path}")
+
+        if subprocess.run(["xz", "-t", out_path]).returncode != 0:
+            raise RuntimeError(f"xz integrity check failed: {out_path}")
+    except Exception:
+        if os.path.exists(out_path):
+            os.remove(out_path)
+        raise
 
     for file in os.listdir(archive_dir):
         file_path = os.path.join(archive_dir, file)
-        if not file.endswith(".zip"):
-            print(f"Removing {file}")
-            if os.path.isdir(file_path):
-                shutil.rmtree(file_path)
-            else:
-                os.remove(file_path)
+        print(f"Removing {file}")
+        if os.path.isdir(file_path):
+            shutil.rmtree(file_path)
+        else:
+            os.remove(file_path)
 
 
 def _move_contents(archive_dir: str, extract_dir: str):
